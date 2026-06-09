@@ -1,33 +1,62 @@
 import socket
+import hashlib
 
-HOST = '127.0.0.1'
-PORT = 5000
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import serialization
 
-# Cria socket TCP
-tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+HOST = "127.0.0.1"
+PORT = 8080
 
-# Associa IP e porta
-tcp.bind((HOST, PORT))
+with open("private_key.pem", "rb") as f:
+    private_key = serialization.load_pem_private_key(
+        f.read(),
+        password=None
+    )
 
-# Coloca em modo de escuta
-tcp.listen()
+with open("public_key.pem", "rb") as f:
+    public_key_bytes = f.read()
 
-print(f'Servidor TCP iniciado em {HOST}:{PORT}')
+with open("arquivo.txt", "rb") as f:
+    arquivo = f.read()
+
+assinatura = private_key.sign(
+    arquivo,
+    padding.PSS(
+        mgf=padding.MGF1(hashes.SHA256()),
+        salt_length=padding.PSS.MAX_LENGTH
+    ),
+    hashes.SHA256()
+)
+
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+server.bind((HOST, PORT))
+server.listen()
+
+print("Servidor aguardando conexão...")
 
 while True:
-    # Aceita conexão
-    conexao, cliente = tcp.accept()
+    cliente, endereco = server.accept()
 
-    print(f'\nConexão realizada por: {cliente}')
+    print("Cliente conectado:", endereco)
 
-    while True:
-        mensagem = conexao.recv(1024)
+    requisicao = cliente.recv(1024)
 
-        if not mensagem:
-            break
+    resposta = (
+        b"HTTP/1.1 200 OK\r\n"
+        b"Content-Type: application/octet-stream\r\n\r\n"
+    )
 
-        print(f'\nCliente: {cliente}')
-        print(f'Mensagem: {mensagem.decode()}')
+    cliente.sendall(resposta)
 
-    print(f'Finalizando conexão do cliente {cliente}')
-    conexao.close()
+    cliente.sendall(len(public_key_bytes).to_bytes(4, 'big'))
+    cliente.sendall(public_key_bytes)
+
+    cliente.sendall(len(assinatura).to_bytes(4, 'big'))
+    cliente.sendall(assinatura)
+
+    cliente.sendall(len(arquivo).to_bytes(4, 'big'))
+    cliente.sendall(arquivo)
+
+    cliente.close()
