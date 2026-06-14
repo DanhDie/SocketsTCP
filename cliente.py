@@ -31,7 +31,7 @@ with open("arquivo_baixado.txt", "wb") as f:
     f.write(arquivo)
 
 # Adulteraçao proposital
-arquivo = arquivo + b"X"
+# arquivo = arquivo + b"X"
 
 # Verifica assinatura
 try:
@@ -44,6 +44,6 @@ try:
         ),
         hashes.SHA256()
     )
-    print("\n✅ Assinatura válida: arquivo autêntico!")
+    print("\nAssinatura válida: arquivo autêntico!")
 except Exception:
-    print("\n❌ Assinatura inválida: arquivo pode ter sido alterado!")
+    print("\nAssinatura inválida: arquivo pode ter sido alterado!")
