@@ -1,63 +1,85 @@
 import socket
+
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization
 
-HOST = '127.0.0.1'
+HOST = "127.0.0.1"
 PORT = 8080
 
-# Gera chave privada e pública
-private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-public_key = private_key.public_key()
 
-# Salva chave pública em arquivo para o cliente usar
-with open("public_key.pem", "wb") as f:
-    f.write(
-        public_key.public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo
-        )
+def enviar_com_tamanho(sock, dados):
+    """
+    Envia:
+    [4 bytes tamanho][dados]
+    """
+    sock.sendall(len(dados).to_bytes(4, "big"))
+    sock.sendall(dados)
+
+
+# Carrega chave privada permanente
+with open("private_key.pem", "rb") as f:
+    private_key = serialization.load_pem_private_key(
+        f.read(),
+        password=None
     )
 
-# Arquivo que será servido
-with open("dados.txt", "rb") as f:
-    conteudo = f.read()
+# Carrega chave pública
+with open("public_key.pem", "rb") as f:
+    public_key_data = f.read()
 
-# Assina o conteúdo
-assinatura = private_key.sign(
-    conteudo,
-    padding.PSS(
-        mgf=padding.MGF1(hashes.SHA256()),
-        salt_length=padding.PSS.MAX_LENGTH
-    ),
-    hashes.SHA256()
-)
-
-# Cria socket TCP
 tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 tcp.bind((HOST, PORT))
 tcp.listen()
 
-print(f"Servidor HTTP com assinatura digital iniciado em {HOST}:{PORT}")
+print(f"Servidor iniciado em {HOST}:{PORT}")
 
 while True:
-    conexao, cliente = tcp.accept()
-    print(f"\nConexão realizada por: {cliente}")
 
-    requisicao = conexao.recv(1024).decode()
-    print(f"Requisição recebida:\n{requisicao}")
+    conexao, endereco = tcp.accept()
 
-    if "GET /arquivo" in requisicao:
-        resposta = (
-            f"HTTP/1.1 200 OK\r\n"
-            f"Content-Type: application/octet-stream\r\n"
-            f"Content-Length: {len(conteudo)}\r\n"
-            f"Connection: close\r\n"
-            f"Server: TrabalhoRedes/1.0\r\n"
-            f"\r\n"
-        ).encode() + conteudo + b"\n---ASSINATURA---\n" + assinatura
-    else:
-        resposta = b"HTTP/1.1 404 Not Found\r\n\r\nRecurso nao encontrado"
+    try:
 
-    conexao.send(resposta)
-    conexao.close()
+        print(f"Cliente conectado: {endereco}")
+
+        requisicao = conexao.recv(1024).decode()
+
+        print(requisicao)
+
+        if "GET /arquivo" not in requisicao:
+            conexao.sendall(b"ERRO")
+            continue
+
+        # Lê arquivo
+        with open("dados.txt", "rb") as f:
+            arquivo = f.read()
+
+        # Assina conteúdo
+        assinatura = private_key.sign(
+            arquivo,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+
+        # Cabeçalho HTTP simples
+        conexao.sendall(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Connection: close\r\n\r\n"
+        )
+
+        # Envia chave pública
+        enviar_com_tamanho(conexao, public_key_data)
+
+        # Envia assinatura
+        enviar_com_tamanho(conexao, assinatura)
+
+        # Envia arquivo
+        enviar_com_tamanho(conexao, arquivo)
+
+        print("Arquivo enviado")
+
+    finally:
+        conexao.close()
