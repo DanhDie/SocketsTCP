@@ -7,76 +7,71 @@ from cryptography.hazmat.primitives import serialization
 HOST = "127.0.0.1"
 PORT = 8080
 
-tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-tcp.connect((HOST, PORT))
+def recv_all(sock, size):
+    """
+    Recebe exatamente 'size' bytes.
+    """
+
+    data = b''
+
+    while len(data) < size:
+
+        pacote = sock.recv(size - len(data))
+
+        if not pacote:
+            raise ConnectionError("Conexão encerrada")
+
+        data += pacote
+
+    return data
+
+
+def receber_bloco(sock):
+    """
+    Recebe:
+    [4 bytes tamanho][dados]
+    """
+
+    tamanho = int.from_bytes(
+        recv_all(sock, 4),
+        "big"
+    )
+
+    return recv_all(sock, tamanho)
+
+
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+client.connect((HOST, PORT))
 
 requisicao = (
     "GET /arquivo HTTP/1.1\r\n"
-    f"Host: {HOST}\r\n"
-    "\r\n"
+    f"Host: {HOST}\r\n\r\n"
 )
 
-tcp.send(requisicao.encode())
+client.sendall(requisicao.encode())
 
-# Recebe cabeçalho HTTP
+# descarta cabeçalho HTTP
+cabecalho = client.recv(1024)
 
-cabecalho = b""
+# recebe chave pública
+public_key_data = receber_bloco(client)
 
-while b"\r\n\r\n" not in cabecalho:
-    cabecalho += tcp.recv(1)
+# recebe assinatura
+assinatura = receber_bloco(client)
 
-print(cabecalho.decode())
+# recebe arquivo
+arquivo = receber_bloco(client)
 
-# Recebe chave pública
-
-tam_pub = int.from_bytes(
-    tcp.recv(4),
-    "big"
-)
-
-public_key_data = b""
-
-while len(public_key_data) < tam_pub:
-    public_key_data += tcp.recv(4096)
-
-# Recebe assinatura
-
-tam_ass = int.from_bytes(
-    tcp.recv(4),
-    "big"
-)
-
-assinatura = b""
-
-while len(assinatura) < tam_ass:
-    assinatura += tcp.recv(4096)
-
-# Recebe arquivo
-
-tam_arq = int.from_bytes(
-    tcp.recv(8),
-    "big"
-)
-
-arquivo = b""
-
-while len(arquivo) < tam_arq:
-    arquivo += tcp.recv(4096)
-
-tcp.close()
-
-with open("arquivo_baixado.txt", "wb") as f:
+with open("arquivo_recebido.txt", "wb") as f:
     f.write(arquivo)
 
-print("Arquivo salvo em arquivo_baixado.txt")
-
+# Alteração do arquivo
+arquivo += b"X"
 public_key = serialization.load_pem_public_key(
     public_key_data
 )
-
-# TESTE DE ADULTERAÇÃO
-# arquivo += b"X"
 
 try:
 
@@ -90,10 +85,12 @@ try:
         hashes.SHA256()
     )
 
-    print("\n✓ Assinatura válida")
+    print("✓ Assinatura válida")
     print("✓ Arquivo autêntico")
 
 except Exception:
 
-    print("\n✗ Assinatura inválida")
-    print("✗ Arquivo foi alterado")
+    print("✗ Assinatura inválida")
+    print("✗ Arquivo alterado")
+
+client.close()

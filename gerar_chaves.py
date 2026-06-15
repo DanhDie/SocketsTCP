@@ -25,4 +25,4 @@ with open("public_key.pem", "wb") as f:
         )
     )
 
-print("Chaves RSA geradas com sucesso.")
+print("Chaves geradas com sucesso.")
